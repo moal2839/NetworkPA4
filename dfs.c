@@ -41,10 +41,10 @@ void init_server(int PORT);
 void kill_server();
 void handle_client(int clientFd);
 Request parse_command(char* source);
-void handle_ls();
-void recv_file(char* filename);
+void handle_ls(int clientFd);
+void recv_file(char* filename, int clientFd);
 void update_metadata(char* filename);
-void send_file(char* filename);
+void send_file(char* filename, int clientFd);
 
 int main(int argc, char** argv) {
     if(argc < 3) {
@@ -71,6 +71,8 @@ int main(int argc, char** argv) {
             close(server.serverFd);
 
             handle_client(connectionFd);
+
+            printf("Connection with client got closed\n");
 
             close(connectionFd);
             exit(0);
@@ -124,12 +126,21 @@ void handle_client(int clientFd) {
     bzero(sendBuffer, BUFF_SIZE);
 
     while((bytes_received = recv(clientFd, recvBuffer, BUFF_SIZE, 0)) > 0) {
-        printf("Received: %s\n", recvBuffer);
 
         Request req = parse_command(recvBuffer);
 
         printf("Req command: %s\n", req.command);
         printf("Req filename: %s\n", req.filename);
+
+        if(!strcmp(req.command, "list")) {
+            handle_ls(clientFd);
+        }
+        else if(!strcmp(req.command, "get")) {
+            send_file(req.filename, clientFd);
+        }
+        else if(!strcmp(req.command, "put")) {
+            recv_file(req.filename, clientFd);
+        }
 
         bzero(recvBuffer, BUFF_SIZE);
     }
@@ -149,4 +160,16 @@ Request parse_command(char* source) {
     out.filename = save;
 
     return out;
+}
+
+void handle_ls(int clientFd) {
+    return;
+}
+
+void recv_file(char* filename, int clientFd) {
+    return;
+}
+
+void send_file(char* filename, int clientFd) {
+    return;
 }
