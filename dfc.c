@@ -49,6 +49,7 @@ void send_file(char* filename);
 void recv_file(char* filename);
 void handle_ls();
 void init_queries(char** argv, int argc);
+int is_up(int fd);
 
 Client client;
 Query queries[1000];
@@ -246,6 +247,11 @@ void handle_ls() {
     int hash_set[256];
     int seen[256];
     char file_list[256][100];
+    int fd_map[4];
+    fd_map[0] = client.dfs1Fd;
+    fd_map[1] = client.dfs2Fd;
+    fd_map[2] = client.dfs3Fd;
+    fd_map[3] = client.dfs4Fd;
 
     char sendBuffer[BUFF_SIZE];
     char recvBuffer[BUFF_SIZE]; 
@@ -259,170 +265,63 @@ void handle_ls() {
         for(int j = 0; j < 100; j++) file_list[i][j] = '\0';
     }
 
+    for(int i = 0; i < 4; i++) {
+        if(!is_up(fd_map[i])) {
+            up[i] = 0;
+        }
+    }
+
     if(up[0]) {
-        struct timeval timeout;
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
-
-        setsockopt(client.dfs1Fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
         strcat(sendBuffer, "list");
-
         send(client.dfs1Fd, sendBuffer, strlen(sendBuffer), 0);
-
         recv(client.dfs1Fd, recvBuffer, BUFF_SIZE, 0);
-
-        char* Token = recvBuffer;
-        char* save = recvBuffer;
-
-        while(strcmp(save, "")) {
-            Token = strtok_r(Token, " \n", &save);
-            uint8_t *hash = md5String(Token);
-            
-            Pair which;
-            int mod = *hash % 4;
-            which = map[mod][0];
-
-            printf("Chunks %d %d\n", which.first, which.second);
-
-            hash_set[*hash] |= (1 << (which.first-1));
-            hash_set[*hash] |= (1 << (which.second-1));
-            
-            if(!seen[*hash]){
-                strcpy(file_list[*hash], Token);
-                seen[*hash] = 1;
-            }
-
-            Token = save;
-        }
-
-        bzero(sendBuffer, BUFF_SIZE);
-        bzero(recvBuffer, BUFF_SIZE);
     }
-    
-    if(up[1]) {
-        struct timeval timeout;
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
-
-        setsockopt(client.dfs2Fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
+    else if(up[1]) {
         strcat(sendBuffer, "list");
-
         send(client.dfs2Fd, sendBuffer, strlen(sendBuffer), 0);
-
         recv(client.dfs2Fd, recvBuffer, BUFF_SIZE, 0);
-
-        char* Token = recvBuffer;
-        char* save = recvBuffer;
-
-        while(strcmp(save, "")) {
-            Token = strtok_r(Token, " \n", &save);
-            uint8_t *hash = md5String(Token);
-            
-            Pair which;
-            int mod = *hash % 4;
-            which = map[mod][1];
-
-            printf("Chunks %d %d\n", which.first, which.second);
-
-            hash_set[*hash] |= (1 << (which.first-1));
-            hash_set[*hash] |= (1 << (which.second-1));
-            
-            if(!seen[*hash]){
-                strcpy(file_list[*hash], Token);
-                seen[*hash] = 1;
-            }
-
-            Token = save;
-        }
-
-        bzero(sendBuffer, BUFF_SIZE);
-        bzero(recvBuffer, BUFF_SIZE);
     }
-    
-    if(up[2]) {
-        struct timeval timeout;
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
-
-        setsockopt(client.dfs3Fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
+    else if(up[2]) {
         strcat(sendBuffer, "list");
-
         send(client.dfs3Fd, sendBuffer, strlen(sendBuffer), 0);
-
         recv(client.dfs3Fd, recvBuffer, BUFF_SIZE, 0);
-
-        printf("recvBuffer: %s\n", recvBuffer);
-
-        char* Token = recvBuffer;
-        char* save = recvBuffer;
-
-        while(strcmp(save, "")) {
-            Token = strtok_r(Token, " \n", &save);
-            uint8_t *hash = md5String(Token);
-            
-            Pair which;
-            int mod = *hash % 4;
-            which = map[mod][2];
-
-            printf("Chunks %d %d\n", which.first, which.second);
-
-            hash_set[*hash] |= (1 << (which.first-1));
-            hash_set[*hash] |= (1 << (which.second-1));
-            
-            if(!seen[*hash]){
-                strcpy(file_list[*hash], Token);
-                seen[*hash] = 1;
-            }
-
-            Token = save;
-        }
-
-        bzero(sendBuffer, BUFF_SIZE);
-        bzero(recvBuffer, BUFF_SIZE);
     }
-    
-    if(up[3]) {
-        struct timeval timeout;
-        timeout.tv_sec = 10;
-        timeout.tv_usec = 0;
-
-        setsockopt(client.dfs4Fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
+    else if(up[3]) {
         strcat(sendBuffer, "list");
-
         send(client.dfs4Fd, sendBuffer, strlen(sendBuffer), 0);
-
         recv(client.dfs4Fd, recvBuffer, BUFF_SIZE, 0);
+    }
 
-        char* Token = recvBuffer;
-        char* save = recvBuffer;
+    char* Token = recvBuffer;
+    char* save = recvBuffer;
 
-        while(strcmp(save, "")) {
-            Token = strtok_r(Token, " \n", &save);
-            uint8_t *hash = md5String(Token);
-            
-            Pair which;
-            int mod = *hash % 4;
-            which = map[mod][3];
-
-            printf("Chunks %d %d\n", which.first, which.second);
-
-            hash_set[*hash] |= (1 << (which.first-1));
-            hash_set[*hash] |= (1 << (which.second-1));
-            
-            if(!seen[*hash]){
-                strcpy(file_list[*hash], Token);
-                seen[*hash] = 1;
-            }
-
-            Token = save;
+    while(strcmp(save, "")) {
+        Token = strtok_r(Token, " \n", &save);
+        uint8_t *hash = md5String(Token);
+        
+        if(!seen[*hash]){
+            strcpy(file_list[*hash], Token);
+            seen[*hash] = 1;
         }
 
-        bzero(sendBuffer, BUFF_SIZE);
-        bzero(recvBuffer, BUFF_SIZE);
+        Token = save;
+    }
+
+    for(int i = 0; i < 4; i++) {
+        if(up[i]){
+            for(int j = 0; j < 256; j++) {
+                if(strcmp(file_list[j], "")) {
+                    uint8_t* hash = md5String(file_list[j]);
+
+                    Pair which;
+                    int mod = *hash % 4;
+                    which = map[mod][i];
+
+                    hash_set[*hash] |= (1 << (which.first-1));
+                    hash_set[*hash] |= (1 << (which.second-1));
+                }
+            }
+        }
     }
 
     for(int i = 0; i < 256; i++) {
@@ -435,4 +334,15 @@ void handle_ls() {
         } 
     }
 
+}
+
+int is_up(int fd) {
+    int error = 0;
+    socklen_t len = sizeof(error);
+    getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len);
+
+    if(error != 0){
+        return 0;
+    }
+    else return 1;
 }
