@@ -1,0 +1,4 @@
+This is a txt file to see how it gets chunked and distributed in dfs servers
+Lets see how this turn out in the server side and hopefully it gets chunked 
+int four relatively equal portions and hashed on the server.
+Dont forget hash filename and add chunk number on server side.

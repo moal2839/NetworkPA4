@@ -1,0 +1,3 @@
+ chunked 
+int four relatively equal portions and hashed on the server.
+D

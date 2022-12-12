@@ -35,6 +35,12 @@ typedef struct Request {
     char* filename;
 } Request;
 
+typedef struct file_data {
+    int uid;
+    long chunk_size;
+    int chunk_num;
+} file_data;
+
 Server server;
 
 void init_server(int PORT);
@@ -42,9 +48,11 @@ void kill_server();
 void handle_client(int clientFd);
 Request parse_command(char* source);
 void handle_ls(int clientFd);
-void recv_file(char* filename, int clientFd);
+void handle_put(char* filename, int clientFd);
+void recv_file(int file, int clientFd, long size);
 void update_metadata(char* filename);
 void send_file(char* filename, int clientFd);
+file_data parse_header(char* source);
 
 int main(int argc, char** argv) {
     if(argc < 3) {
@@ -152,7 +160,11 @@ void handle_client(int clientFd) {
             send_file(req.filename, clientFd);
         }
         else if(!strcmp(req.command, "put")) {
-            recv_file(req.filename, clientFd);
+            char* msg = "ack";
+
+            send(clientFd, msg, strlen(msg), 0);
+
+            handle_put(req.filename, clientFd);
         }
 
         bzero(recvBuffer, BUFF_SIZE);
@@ -213,10 +225,165 @@ void handle_ls(int clientFd) {
     return;
 }
 
-void recv_file(char* filename, int clientFd) {
-    return;
+void handle_put(char* filename, int clientFd) {
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+
+    char file_type[15];
+    bzero(file_type, 15);
+
+    if(strstr(filename, ".")) {
+        int count = 0;
+        int start = 0;
+        int n = strlen(filename);
+
+        for(int i = 0; i < n; i++) {
+            if(filename[i] == '.' && !start) {
+                start = 1;
+                file_type[count] = filename[i];
+                count++;
+            }
+            else if(start) {
+                file_type[count] = filename[i];
+                count++;
+            }
+        }
+    }
+
+    recv(clientFd, recvBuffer, BUFF_SIZE, 0);
+
+    file_data f_data = parse_header(recvBuffer);
+
+    char* msg = "ack";
+
+    send(clientFd, msg, strlen(msg), 0);
+
+    bzero(recvBuffer, BUFF_SIZE);
+
+    char pathname[100];
+    bzero(pathname, 100);
+    strcat(pathname, server.dir);
+    strcat(pathname, "/");
+
+    char id[3];
+    bzero(id, 3);
+
+    sprintf(id, "%d", f_data.uid);
+
+    char hash_with_id[100];
+    bzero(hash_with_id, 100);
+    strcat(hash_with_id, filename);
+    strcat(hash_with_id, id);
+
+    uint8_t* p = md5String(hash_with_id);
+
+    char digest[33];
+    bzero(digest, 33);
+
+    sprintf(digest, "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", p[0], 
+    p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], p[11], p[12], p[13],
+    p[14], p[15]);
+
+    strcat(pathname, digest);
+    
+    char num[2];
+    bzero(num, 2);
+
+    sprintf(num, "%d", f_data.chunk_num);
+
+    char pathname2[100];
+    bzero(pathname2, 100);
+
+    strcat(pathname2, pathname);
+
+    strcat(pathname, "-");
+    strcat(pathname, num);
+
+    if(strcmp(file_type, "")){
+        strcat(pathname, file_type);
+    }
+
+    printf("pathname: %s\n", pathname);
+
+    FILE* file = fopen(pathname, "wb");
+
+    recv_file(fileno(file), clientFd, f_data.chunk_size);
+
+    printf("here\n");
+
+    fclose(file);
+    recv(clientFd, recvBuffer, BUFF_SIZE, 0);
+
+    file_data f_data2 = parse_header(recvBuffer);
+
+    send(clientFd, msg, strlen(msg), 0);
+
+    strcat(pathname2, "-");
+    bzero(num, 2);
+    sprintf(num, "%d", f_data2.chunk_num);
+    strcat(pathname2, num);
+
+    if(strcmp(file_type, "")){
+        strcat(pathname2, file_type);
+    }
+
+    printf("pathname2: %s\n", pathname2);
+
+    FILE* file2 = fopen(pathname2, "wb");
+
+    recv_file(fileno(file2), clientFd, f_data2.chunk_size);
+
+    fclose(file2);
+}
+
+void recv_file(int file, int clientFd, long size) {
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+
+    long bytes = 0;
+    long bytesRecv = 0;
+
+    while( bytes < size && (bytesRecv = recv(clientFd, recvBuffer, BUFF_SIZE, 0))) {
+        bytes += bytesRecv;
+        printf("bytes: %ld\n", bytes);
+
+        write(file, recvBuffer, bytesRecv);
+
+        bzero(recvBuffer, BUFF_SIZE);
+    }
+
+    char* msg = "received";
+
+    send(clientFd, msg, strlen(msg), 0);    
 }
 
 void send_file(char* filename, int clientFd) {
     return;
+}
+
+file_data parse_header(char* source) {
+    file_data out;
+    out.chunk_num = 0;
+    out.chunk_size = 0;
+    out.uid = 0;
+
+    char* Token = source;
+    char* save = source;
+
+    Token = strtok_r(Token, " \n", &save);
+    Token = save;
+    Token = strtok_r(Token, " \n", &save);
+    out.uid = atoi(Token);
+    Token = save;
+    Token = strtok_r(Token, " \n", &save);
+    Token = save;
+    Token = strtok_r(Token, " \n", &save);
+    out.chunk_num = atoi(Token);
+    Token = save;
+    Token = strtok_r(Token, " \n", &save);
+    out.chunk_size = atol(save);
+
+    printf("uid: %d, chunk-num: %d, chunk-size: %ld\n", out.uid, out.chunk_num, out.chunk_size);
+
+    return out;
 }

@@ -43,13 +43,19 @@ typedef struct Pair {
     int second;
 } Pair;
 
+typedef struct Chunk {
+    char* data;
+} Chunk;
+
 addr_n_port get_addrnport(char* line);
 void query_dfs();
-void send_file(char* filename);
+void send_file(int fd, char* chunk, int num);
 void recv_file(char* filename);
 void handle_ls();
+void handle_put(Query q);
 void init_queries(char** argv, int argc);
 int is_up(int fd);
+long get_size(char* filename);
 
 Client client;
 Query queries[1000];
@@ -59,12 +65,17 @@ int up[4];
 
 Pair map[4][4];
 
+int uid = 0;
+
 int main(int argc, char** argv) {
 
     Pair p1;
     Pair p2;
     Pair p3;
     Pair p4;
+
+    srand(time(NULL));
+    uid = rand() % 30;
 
     p1.first = 1;
     p1.second = 2;
@@ -204,6 +215,12 @@ void query_dfs() {
     for(int i = 0; i < query_size; i++) {
         if(!strcmp(queries[i].command, "list")) {
             handle_ls();
+        }
+        else if(!strcmp(queries[i].command, "get")) {
+
+        }
+        else if(!strcmp(queries[i].command, "put")) {
+            handle_put(queries[i]);
         }
     }
 
@@ -345,4 +362,165 @@ int is_up(int fd) {
         return 0;
     }
     else return 1;
+}
+
+void handle_put(Query q) {
+    int fd_map[4];
+    fd_map[0] = client.dfs1Fd;
+    fd_map[1] = client.dfs2Fd;
+    fd_map[2] = client.dfs3Fd;
+    fd_map[3] = client.dfs4Fd;
+
+    char sendBuffer[BUFF_SIZE];
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+    bzero(sendBuffer, BUFF_SIZE);
+
+    int count = 0;
+
+    for(int i = 0; i < 4; i++) {
+        if(!is_up(fd_map[i])) {
+            up[i] = 0;
+        }
+        else count++;
+    }
+
+    if(count < 3) {
+        printf("%s put failed\n", q.filename);
+        return;
+    }
+    
+    FILE* file = fopen(q.filename, "rb");
+
+    if(file == NULL) {
+        printf("File doesn't exist\n");
+        return;
+    }
+
+    long file_size = get_size(q.filename);
+
+    long chunk_size = (file_size / 4) + 3;
+
+    uint8_t* hash = md5String(q.filename);
+    int mod = *hash % 4;
+
+    Chunk chunks[4];
+    for(int i = 0; i < 4; i++) chunks[i].data = calloc(chunk_size+1, sizeof(char));
+
+    int f = fileno(file);
+
+    read(f, chunks[0].data, chunk_size);
+    read(f, chunks[1].data, chunk_size);
+    read(f, chunks[2].data, chunk_size);
+    read(f, chunks[3].data, chunk_size);
+
+    strcat(sendBuffer, "put ");
+    strcat(sendBuffer, q.filename);
+
+    for(int i = 0; i < 4; i++) {
+        if(up[i]) {
+            Pair which;
+            which = map[mod][i];
+
+            send(fd_map[i], sendBuffer, strlen(sendBuffer), 0);
+
+            recv(fd_map[i], recvBuffer, BUFF_SIZE, 0);
+
+            printf("received ack: %s\n", recvBuffer);
+
+            send_file(fd_map[i], chunks[which.first-1].data, which.first);
+
+            recv(fd_map[i], recvBuffer, BUFF_SIZE, 0);
+
+            printf("received ack: %s\n", recvBuffer);
+            bzero(recvBuffer, BUFF_SIZE);
+
+            send_file(fd_map[i], chunks[which.second-1].data, which.second);
+
+            printf("received ack: %s\n", recvBuffer);
+            bzero(recvBuffer, BUFF_SIZE);
+        }
+    }
+    
+    free(chunks[0].data);
+    free(chunks[1].data);
+    free(chunks[2].data);
+    free(chunks[3].data);
+
+    close(f);
+
+    return;
+}
+
+long get_size(char* filename) {
+    struct stat st;
+
+    stat(filename, &st);
+
+    return st.st_size;
+}
+
+void send_file(int fd, char* chunk, int num) {
+    char header_buffer[BUFF_SIZE];
+    bzero(header_buffer, BUFF_SIZE);
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+
+    char s_num[20];
+    char id[3];
+    char ch_num[2];
+    bzero(id, 3);
+    bzero(ch_num, 2);
+    bzero(s_num, 20);
+
+    long size = strlen(chunk);
+
+    sprintf(s_num, "%ld", size);
+    sprintf(id, "%d", uid);
+    sprintf(ch_num, "%d", num);
+
+    printf("chunk size: %s\n", s_num);
+
+    strcat(header_buffer, "uid: ");
+    strcat(header_buffer, id);
+    strcat(header_buffer, " chunk-num: ");
+    strcat(header_buffer, ch_num);
+    strcat(header_buffer, " chunk-size: ");
+    strcat(header_buffer, s_num);
+
+    send(fd, header_buffer, strlen(header_buffer), 0);
+
+    recv(fd, recvBuffer, BUFF_SIZE, 0);
+
+    printf("received header ack: %s\n", recvBuffer);
+    bzero(recvBuffer, BUFF_SIZE);
+
+    char sendBuffer[BUFF_SIZE];
+    bzero(sendBuffer, BUFF_SIZE);
+
+    long bytes = 0;
+
+    if(size <= BUFF_SIZE) {
+        send(fd, chunk, size, 0);
+        return;
+    }
+    else{
+        while(bytes < size) {
+            long n = strlen(chunk+bytes);
+
+            if(n < BUFF_SIZE) {
+                strncpy(sendBuffer, chunk+bytes, n);
+                bytes += n;
+            }
+            else{
+                strncpy(sendBuffer, chunk+bytes, BUFF_SIZE);
+                bytes += BUFF_SIZE;
+            }
+
+            send(fd, sendBuffer, strlen(sendBuffer), 0);
+
+            bzero(sendBuffer, BUFF_SIZE);           
+        }        
+    }
+
 }
