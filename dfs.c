@@ -52,6 +52,19 @@ int main(int argc, char** argv) {
         return -1;
     }
 
+    char pathname[100];
+    bzero(pathname, 100);
+
+    strcat(pathname, argv[1]);
+    strcat(pathname, "/metadata-logfile.txt");
+
+    printf("pathname: %s\n", pathname);
+
+    if(access(pathname, F_OK) != 0) {
+        FILE* f = fopen(pathname, "wb");
+        fclose(f);
+    }
+
     server.dir = argv[1];
     int PORT = atoi(argv[2]);
     pid_t pid;
@@ -112,11 +125,11 @@ void init_server(int PORT) {
 
 void handle_client(int clientFd) {
 
-    struct timeval timeout;
-    timeout.tv_sec = 10;
-    timeout.tv_usec = 0;
+    // struct timeval timeout;
+    // timeout.tv_sec = 10;
+    // timeout.tv_usec = 0;
 
-    setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    // setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     
     int bytes_received = 0;
 
@@ -154,7 +167,7 @@ Request parse_command(char* source) {
     char* token = source;
     char* save = "";
 
-    token = strtok_r(token, " ", &save);
+    token = strtok_r(token, " \n", &save);
 
     out.command = token;
     out.filename = save;
@@ -163,6 +176,40 @@ Request parse_command(char* source) {
 }
 
 void handle_ls(int clientFd) {
+    char pathname[100];
+    bzero(pathname, 100);    
+
+    strcat(pathname, server.dir);
+    strcat(pathname, "/metadata-logfile.txt");
+
+    FILE* f = fopen(pathname, "rb");
+
+    ssize_t read;
+    char* line = NULL;
+    size_t len = 0;
+    int bytes = 0;
+
+    char sendBuffer[BUFF_SIZE];
+    bzero(sendBuffer, BUFF_SIZE);
+
+    while((read = getline(&line, &len, f)) != -1) {
+        if(line[read-1] == '\n') line[read-1] = '\0';
+
+        char* Token = line;
+        char* save;
+        Token = strtok_r(Token, " \n", &save);
+
+        printf("Filename: %s\n", Token);
+
+        strcat(sendBuffer, Token);
+        strcat(sendBuffer, "\n");
+
+        bytes += strlen(Token);
+        bytes += 1;
+    }
+
+    send(clientFd, sendBuffer, bytes, 0);
+
     return;
 }
 

@@ -1,0 +1,1 @@
+foo.txt hash_for_foo

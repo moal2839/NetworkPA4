@@ -19,6 +19,8 @@ int main(int argc, char** argv) {
     result1 = md5String(test1);
     result2 = md5String(test2);
 
+    printf("%d %d\n", *result1, *result2);
+
     print_hash(result1);
     print_hash(result2);
 
