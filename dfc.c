@@ -50,9 +50,10 @@ typedef struct Chunk {
 addr_n_port get_addrnport(char* line);
 void query_dfs();
 void send_file(int fd, char* chunk, int num);
-void recv_file(char* filename);
+void recv_file(int file, int fd);
 void handle_ls();
 void handle_put(Query q);
+void handle_get(Query q);
 void init_queries(char** argv, int argc);
 int is_up(int fd);
 long get_size(char* filename);
@@ -217,7 +218,7 @@ void query_dfs() {
             handle_ls();
         }
         else if(!strcmp(queries[i].command, "get")) {
-
+            handle_get(queries[i]);
         }
         else if(!strcmp(queries[i].command, "put")) {
             handle_put(queries[i]);
@@ -523,4 +524,145 @@ void send_file(int fd, char* chunk, int num) {
         }        
     }
 
+}
+
+void handle_get(Query q) {
+    int is_complete = 0;
+    int fd_map[4];
+    fd_map[0] = client.dfs1Fd;
+    fd_map[1] = client.dfs2Fd;
+    fd_map[2] = client.dfs3Fd;
+    fd_map[3] = client.dfs4Fd;
+
+    int received[5];
+
+    for(int i = 0; i < 5; i++) received[i] = 0;
+
+    char sendBuffer[BUFF_SIZE];
+    bzero(sendBuffer, BUFF_SIZE);
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+
+    for(int i = 0; i < 4; i++) {
+        if(!is_up(fd_map[i])) {
+            up[i] = 0;
+        }
+    }
+
+    uint8_t* hash = md5String(q.filename);
+    int mod = *hash % 4;
+
+    for(int i = 0; i < 4; i++) {
+        if(up[i]) {
+            Pair which;
+            which = map[mod][i];
+
+            is_complete |= (1 << (which.first-1));
+            is_complete |= (1 << (which.second-1));
+        }
+    }
+
+    if(is_complete != 15) {
+        printf("%s is incomplete\n", q.filename);
+        return;
+    }
+
+    FILE* file = fopen(q.filename, "wb");
+
+    for(int i = 0; i < 4; i++) {
+        for(int j = 0; j < 4; j++){
+            if(up[j]) {
+                Pair which = map[mod][j];
+
+                if(which.first == (i+1) && received[which.first] == 0) {
+                    strcat(sendBuffer, q.command);
+                    strcat(sendBuffer, " ");
+                    strcat(sendBuffer, q.filename);
+
+                    send(fd_map[j], sendBuffer, strlen(sendBuffer), 0);
+                    bzero(sendBuffer, BUFF_SIZE);
+
+                    recv(fd_map[j], recvBuffer, BUFF_SIZE, 0);
+                    printf("received get-ack\n");
+                    bzero(recvBuffer, BUFF_SIZE);
+
+                    char num[2];
+                    bzero(num, 2);
+
+                    sprintf(num, "%d", which.first);
+
+                    strcat(sendBuffer, "chunk: ");
+                    strcat(sendBuffer, num);
+
+                    send(fd_map[j], sendBuffer, strlen(sendBuffer), 0);
+                    bzero(sendBuffer, BUFF_SIZE);
+
+                    recv_file(fileno(file), fd_map[j]);
+
+                    received[which.first] = 1;
+                }
+                else if(which.second == (i+1) && received[which.second] == 0) {
+                    strcat(sendBuffer, q.command);
+                    strcat(sendBuffer, " ");
+                    strcat(sendBuffer, q.filename);
+
+                    send(fd_map[j], sendBuffer, strlen(sendBuffer), 0);
+                    bzero(sendBuffer, BUFF_SIZE);
+
+                    recv(fd_map[j], recvBuffer, BUFF_SIZE, 0);
+                    printf("received get-ack\n");
+                    bzero(recvBuffer, BUFF_SIZE);
+
+                    char num[2];
+                    bzero(num, 2);
+
+                    sprintf(num, "%d", which.second);
+
+                    strcat(sendBuffer, "chunk: ");
+                    strcat(sendBuffer, num);
+
+                    send(fd_map[j], sendBuffer, strlen(sendBuffer), 0);
+                    bzero(sendBuffer, BUFF_SIZE);
+
+                    recv_file(fileno(file), fd_map[j]);
+
+                    received[which.second] = 1;
+                }
+            }
+        }
+    }
+}
+
+void recv_file(int file, int fd) {
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+
+    long size = 0;
+
+    recv(fd, recvBuffer, BUFF_SIZE, 0);
+
+    char* Token = recvBuffer;
+    char* save;
+
+    Token = strtok_r(Token, " ", &save);
+
+    size = atol(save);
+
+    printf("chunk size: %ld", size);
+
+    bzero(recvBuffer, BUFF_SIZE);
+
+    char* msg = "ack";
+
+    send(fd, msg, strlen(msg), 0);
+
+    long bytes = 0;
+    int bytesRecv = 0;
+
+    while(bytes < size && (bytesRecv = recv(fd, recvBuffer, BUFF_SIZE, 0))) {
+        bytes += bytesRecv;
+
+        write(file, recvBuffer, bytesRecv);
+        bzero(recvBuffer, BUFF_SIZE);
+    }
 }

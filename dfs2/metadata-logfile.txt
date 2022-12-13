@@ -1,1 +1,1 @@
-foo.txt hash_for_foo
+bar.txt 967b9d3ad34610ea20cf897c20e03ae9

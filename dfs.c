@@ -49,10 +49,12 @@ void handle_client(int clientFd);
 Request parse_command(char* source);
 void handle_ls(int clientFd);
 void handle_put(char* filename, int clientFd);
+void handle_get(char* filename, int clientFd);
 void recv_file(int file, int clientFd, long size);
-void update_metadata(char* filename);
-void send_file(char* filename, int clientFd);
+void update_metadata(char* filename, char* hash);
+void send_file(int filename, int clientFd);
 file_data parse_header(char* source);
+long get_size(char* filename);
 
 int main(int argc, char** argv) {
     if(argc < 3) {
@@ -157,7 +159,7 @@ void handle_client(int clientFd) {
             handle_ls(clientFd);
         }
         else if(!strcmp(req.command, "get")) {
-            send_file(req.filename, clientFd);
+            handle_get(req.filename, clientFd);
         }
         else if(!strcmp(req.command, "put")) {
             char* msg = "ack";
@@ -334,6 +336,8 @@ void handle_put(char* filename, int clientFd) {
     recv_file(fileno(file2), clientFd, f_data2.chunk_size);
 
     fclose(file2);
+
+    update_metadata(filename, digest);
 }
 
 void recv_file(int file, int clientFd, long size) {
@@ -357,8 +361,16 @@ void recv_file(int file, int clientFd, long size) {
     send(clientFd, msg, strlen(msg), 0);    
 }
 
-void send_file(char* filename, int clientFd) {
-    return;
+void send_file(int file, int clientFd) {
+    char sendBuffer[BUFF_SIZE];
+    bzero(sendBuffer, BUFF_SIZE);
+
+    int bytes = 0;
+
+    while((bytes = read(file, sendBuffer, BUFF_SIZE))) {
+        send(clientFd, sendBuffer, bytes, 0);
+        bzero(sendBuffer, BUFF_SIZE);
+    }
 }
 
 file_data parse_header(char* source) {
@@ -386,4 +398,143 @@ file_data parse_header(char* source) {
     printf("uid: %d, chunk-num: %d, chunk-size: %ld\n", out.uid, out.chunk_num, out.chunk_size);
 
     return out;
+}
+
+void update_metadata(char* filename, char* hash) {
+    char pathname[100];
+    bzero(pathname, 100);
+
+    strcat(pathname, server.dir);
+    strcat(pathname, "/metadata-logfile.txt");
+
+    FILE* file = fopen(pathname, "a");
+
+    char add[100];
+    bzero(add, 100);
+
+    strcat(add, filename);
+    strcat(add, " ");
+    strcat(add, hash);
+    strcat(add, "\n");
+
+    write(fileno(file), add, strlen(add));
+
+    fclose(file);
+}
+
+void handle_get(char* filename, int clientFd) {
+    char pathname[100];
+    bzero(pathname, 100);
+
+    strcat(pathname, server.dir);
+    strcat(pathname, "/metadata-logfile.txt");
+
+    FILE* file = fopen(pathname, "rb");
+
+    ssize_t read;
+    char* line = NULL;
+    char* hash = "";
+    size_t len = 0;
+
+    while((read = getline(&line, &len, file)) != -1) {
+        if(line[read-1] == '\n') line[read-1] = '\0';
+
+        char* t = line;
+        char* s = line;
+
+        t = strtok_r(t, " ", &s);
+
+        if(!strcmp(t, filename)) {
+            hash = s;
+            break;
+        }
+    }
+
+    fclose(file);
+    
+    char* msg = "get-ack";
+    send(clientFd, msg, strlen(msg), 0);
+
+    char recvBuffer[BUFF_SIZE];
+    bzero(recvBuffer, BUFF_SIZE);
+
+    recv(clientFd, recvBuffer, BUFF_SIZE, 0);
+
+    char* Token = recvBuffer;
+    char* save;
+
+    Token = strtok_r(Token, " ", &save);
+
+    printf("chunk-num is: %s\n", save);
+
+    char fname[100];
+
+    char file_type[15];
+    bzero(file_type, 15);
+
+    if(strstr(filename, ".")) {
+        int count = 0;
+        int start = 0;
+        int n = strlen(filename);
+
+        for(int i = 0; i < n; i++) {
+            if(filename[i] == '.' && !start) {
+                start = 1;
+                file_type[count] = filename[i];
+                count++;
+            }
+            else if(start) {
+                file_type[count] = filename[i];
+                count++;
+            }
+        }
+    }
+
+    strcat(fname, server.dir);
+    strcat(fname, "/");
+    strcat(fname, hash);
+    strcat(fname, "-");
+    strcat(fname, save);
+    strcat(fname, file_type);
+
+    bzero(recvBuffer, BUFF_SIZE);
+
+    printf("fname is: %s\n", fname);
+
+    FILE* file2 = fopen(fname, "rb");
+
+    long size = get_size(fname);
+
+    bzero(fname, 100);
+    
+    char num[20];
+    bzero(num, 20);
+
+    sprintf(num, "%ld", size);
+
+    char sendBuffer[BUFF_SIZE];
+    bzero(sendBuffer, BUFF_SIZE);
+
+    strcat(sendBuffer, "chunk-size: ");
+    strcat(sendBuffer, num);
+
+    send(clientFd, sendBuffer, strlen(sendBuffer), 0);
+
+    bzero(sendBuffer, BUFF_SIZE);
+
+    recv(clientFd, recvBuffer, BUFF_SIZE, 0);
+
+    bzero(recvBuffer, BUFF_SIZE);
+
+    send_file(fileno(file2), clientFd);
+
+    fclose(file2);
+}
+
+long get_size(char* filename) {
+    struct stat st;
+
+    stat(filename, &st);
+
+    return st.st_size;
 }

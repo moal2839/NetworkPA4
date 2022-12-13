@@ -1,1 +1,0 @@
-Chunk2 for foo.txt
